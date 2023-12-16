@@ -107,3 +107,164 @@ In this section, we dive into the practical implementation of Quantization and L
      !pip install einops
 
 
+The first step in the process is to load the necessary libraries. These include `bitsandbytes`, `torch`,`transformers`,`peft`, `datasets`, `accelerate`, `loralib`, `einops`, and `xformers`. Each of these libraries serves a specific purpose in the fine-tuning process:
+
+1. `bitsandbytes`: A lightweight wrapper by Hugging Face (🤗) around CUDA custom functions, particularly 8-bit optimizers and quantization functions. It’s used to handle the quantization process in QLoRA.
+2. `peft`: A library by 🤗 that enables parameter efficient fine tuning.
+3. `transformers`: A library by 🤗 that provides pre-trained models and training utilities for various natural language processing tasks.
+4. `datasets`: Another library by 🤗 that provides easy access to a wide range of datasets.
+5. `accelerate`: A library that by 🤗 abstracts the boilerplate code related to multi-GPUs/TPU/fp16, making it easier to write the training loop of PyTorch models.
+6. `loralib`: A PyTorch implementation of Low-Rank Adaptation (LoRA), a parameter-efficient approach to adapt a large pre-trained deep learning model.
+7. `einops`: A library that simplifies tensor operations.
+8. `xformers`: A collection of composable Transformer building blocks.
+
+### import the necessary library to use
+
+    import os
+    import bitsandbytes as bnb
+    import pandas as pd
+    import torch
+    import torch.nn as nn
+    import transformers
+    from datasets import load_dataset
+    from huggingface_hub import notebook_login
+    from peft import (
+        LoraConfig,
+        PeftConfig,
+        get_peft_model,
+        prepare_model_for_kbit_training,
+    )
+    from transformers import (
+        AutoConfig,
+        AutoModelForCausalLM,
+        AutoTokenizer,
+        BitsAndBytesConfig,
+    )
+
+after importing the necessary library i will use a hggingface api token witch is a free token to log in their notebook-
+
+    notebook_login("your api token")
+
+##### Loading the Pre-Trained Model
+The next step is to load the pre-trained model. In this case, the Falcon 7b model is loaded using the `AutoModelForCausalLM.from_pretrained()` function from the 🤗 transformers library. The model is loaded in 4-bit using the `BitsAndBytesConfig` from the bitsandbytes library. This is part of the QLoRA process, which involves quantizing the pre-trained weights of the model to 4-bit and keeping them fixed during fine-tuning.
+
+    MODEL_NAME = "OpenAssistant/falcon-7b-sft-mix-2000"
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        load_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    
+    model =AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        device_map="auto",
+        trust_remote_code=True,
+        quantization_config=bnb_config,
+    )
+    
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer.pad_token = tokenizer.eos_token
+
+for loaw rank addaptation for my model i am using `LoraConfig` from `peft` library.
+
+
+    config = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules=["query_key_value"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM"
+    )
+    
+    model = get_peft_model(model, config)
+
+ The LoRA configuration is set up using the `LoraConfig` class. The parameters in this configuration include:
+
+`r`: The rank of the update matrices. Lower rank results in smaller update matrices with fewer trainable parameters.
+`lora_alpha`: LoRA scaling factor.
+`target_modules`: The modules (for example, attention blocks) to apply the LoRA update matrices.
+`lora_dropout`: Dropout probability of the LoRA layers.
+`bias`: Specifies if the bias parameters should be trained. Can be ‘none’, ‘all’ or ‘lora_only’.
+The model is then updated with the LoRA configuration using the `get_peft_model()` function.
+
+For this project i use a question answer dataset from amajon service. My goal is to make a amajon assistant who can tell me the various types of policy using in amajon.
+
+After loading the model we need a efficient prompt to finetune our model. prompt plays an efficient role in finetuning llm. If your promt is perfect that means your large language model will understand how give result of the query. The importance of prompt are given below-
+
+1. Context and Intent: Prompts provide context and specify the desired intent of the fine-tuning task. They tell the LLM what to focus on and what kind of output is expected. This helps the model learn the specific patterns and nuances required for the task.
+2. Controlling Creativity: By crafting specific prompts, you can guide the model's creative direction and prevent it from generating irrelevant or off-topic outputs. This is particularly important for tasks like creative writing or code generation.
+3. Targeted Learning: Prompts allow you to focus the LLM's learning on a specific subset of the training data. This can significantly reduce the amount of data needed for fine-tuning and improve training efficiency.
+4. Mitigating Bias: By carefully crafting prompts, you can mitigate potential biases present in the training data. This helps ensure the LLM generates fair and unbiased outputs in the fine-tuned task.
+5. Versatility: Prompts can be easily adapted to different fine-tuning tasks. This allows you to use the same LLM for various purposes without extensive retraining.
+6. Fine-grained Control: You can fine-tune the model's behavior by adjusting the wording, style, and structure of the prompts. This gives you a high degree of control over the model's output and allows you to tailor it to your specific needs.
+
+###### So now we will write a prompt for our project-
+
+    def generate_prompt(data_point):
+        return f"""
+    <|prompter|> {data_point["Question"]}
+    <|endoftext|><|assistant|> {data_point["Answer"]}
+      """.strip()
+    
+    def generate_and_tokenize_prompt(data_point):
+        full_prompt = generate_prompt(data_point)
+        print(full_prompt)
+        tokenized_full_prompt = tokenizer(full_prompt,padding=True, truncation=True)
+        return tokenized_full_prompt
+
+the first function will generate prompt for our data input and the second function tokenize all the in put with the prompt.
+
+Then a read the data from the directory with the help of pandas and convert the dataset into a huggingface dataset using `datasets` library. and then i use map function to map the `generate_and_tokenize` function to my dataset. This way of processing the input data will help my llm to understand the task very efficiently.
+
+    import pandas as pd
+    df=pd.read_csv("/content/Amazon_Policy_Self.csv")
+    
+    from datasets import Dataset
+    dataset = Dataset.from_pandas(df)
+    dataset = dataset.shuffle().map(generate_and_tokenize_prompt)
+
+#### The next task is to Setting Up the Training Arguments
+
+    training_args = transformers.TrainingArguments(
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
+        num_train_epochs=10,
+        learning_rate=2e-4,
+        fp16=True,
+        save_total_limit=4,
+        logging_steps=2,
+        output_dir=OUTPUT_DIR,
+        max_steps=500,
+        optim="paged_adamw_8bit",
+        lr_scheduler_type = 'cosine',
+        warmup_ratio = 0.05,
+        report_to = 'tensorboard'
+    )
+
+The training arguments are set up using the `TrainingArguments` class from the transformers library. These arguments include:
+
+`auto_find_batch_size`: If set to True, the trainer will automatically find the largest batch size that fits into memory.
+`num_train_epochs`: The number of training epochs.
+`learning_rate`: The learning rate for the optimizer.
+`bf16`: If set to True, the trainer will use bf16 precision for training.
+`save_total_limit`: The total number of checkpoints that can be saved.
+`logging_steps`: The number of steps between each logging.
+`output_dir`: The directory where the model checkpoints will be saved.
+`save_strategy`: The strategy to use for saving checkpoints. In this case, a checkpoint is saved after each epoch.
+
+#### Training the Model
+
+    trainer = transformers.Trainer(
+        model=model,
+        train_dataset=dataset,
+        args=training_args,
+        data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
+    )
+    model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
+    trainer.train()
+
+
+Finally, the model is trained using the `Trainer` class from the transformers library. The trainer takes in the model, the dataset, the training arguments, and a data collator for language modeling. The training process is then started using the `train()` method of the trainer.
