@@ -19,6 +19,8 @@ With the help of low rank addaption (LoRA) we can solve this problem and train o
 
 Low-Rank Adaptation (LoRA) is a technique designed to make the fine-tuning process more efficient and accessible. LoRA introduces a low-rank matrix that is added to the pre-existing weight matrix of the model during the fine-tuning process. This low-rank matrix is much smaller than the original weight matrix, making it easier and faster to update during training.
 
+![Lora](https://images.ctfassets.net/xjan103pcp94/6fct47v2q8PU36X9A1TUzN/62bf8834293c1ec4a7e591f42ed1ffd1/pretrainined-weights-diagram-lora-blog.png)
+
 ##### Mathematical Concepts Related to LoRA
 Understanding LoRA requires a grasp of certain mathematical concepts, particularly those related to matrix operations. LoRA involves the addition of a low-rank matrix to the weight matrix of the model. A low-rank matrix is a matrix in which the number of linearly independent rows or columns is less than the maximum possible. In other words, it’s a matrix that can be factored into the product of two smaller matrices.
 
