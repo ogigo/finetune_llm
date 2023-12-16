@@ -28,4 +28,4 @@ The concept of rank is crucial here. In linear algebra, the rank of a matrix is 
 
 The beauty of LoRA, or Low-Rank Adaptation, lies in its elegant simplicity and its profound impact on the training of Large Language Models (LLMs). The core concept of LoRA revolves around an equation that succinctly summarizes how a neural network adapts to specific tasks during training. Let’s break down this equation:
 
-
+![equation](https://miro.medium.com/v2/resize:fit:1400/format:webp/1*9upxmNtY-azQzi9O0t1GjQ.png)
